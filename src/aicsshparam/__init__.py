@@ -11,3 +11,6 @@ __version__ = "0.1.11"
 
 def get_module_version():
     return __version__
+
+
+from .shinvariants import get_invariants, power_spectrum, bispectrum  # noqa: E402,F401
