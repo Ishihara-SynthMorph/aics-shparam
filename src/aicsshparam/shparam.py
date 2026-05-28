@@ -131,11 +131,9 @@ def get_shcoeffs(
     mesh, image_, centroid = shtools.get_mesh_from_image(image=image_, sigma=sigma)
 
     if not image_[tuple([int(u) for u in centroid[::-1]])]:
-        warnings.warn(
-            "Mesh centroid seems to fall outside the object. This indicates\
+        warnings.warn("Mesh centroid seems to fall outside the object. This indicates\
         the mesh may not be a manifold suitable for spherical harmonics\
-        parameterization."
-        )
+        parameterization.")
 
     # Get coordinates of mesh points
     coords = numpy_support.vtk_to_numpy(mesh.GetPoints().GetData())

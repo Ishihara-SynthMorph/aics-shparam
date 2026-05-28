@@ -10,7 +10,6 @@ from scipy import interpolate as sciinterp
 from vtk.util import numpy_support as vtknp
 from sklearn import decomposition as skdecomp
 
-
 EPS = 1e-12
 
 
