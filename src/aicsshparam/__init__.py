@@ -8,9 +8,10 @@ __email__ = "matheus.viana@alleninstitute.org"
 # Details in CONTRIBUTING.md
 __version__ = "0.1.11"
 
+__all__ = ["get_module_version", "get_invariants", "power_spectrum", "bispectrum"]
+
+from .shinvariants import get_invariants, power_spectrum, bispectrum
+
 
 def get_module_version():
     return __version__
-
-
-from .shinvariants import get_invariants, power_spectrum, bispectrum  # noqa: E402,F401

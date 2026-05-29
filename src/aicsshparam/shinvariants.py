@@ -87,7 +87,7 @@ def _wigner3j(j1: int, j2: int, j3: int, m1: int, m2: int, m3: int) -> float:
 
 
 @lru_cache(maxsize=None)
-def _cg(l1: int, m1: int, l2: int, m2: int, l: int, m: int) -> float:
+def _cg(l1: int, m1: int, l2: int, m2: int, l: int, m: int) -> float:  # noqa: E741
     """Clebsch-Gordan coefficient <l1,m1; l2,m2 | l,m>.
 
     Computed via the Wigner 3j symbol relation::
@@ -149,7 +149,7 @@ def _parse_coeffs_to_array(coeffs, lmax: int) -> np.ndarray:
     n = len(df)
     f = np.zeros((n, lmax + 1, 2 * lmax + 1), dtype=complex)
 
-    for l in range(lmax + 1):
+    for l in range(lmax + 1):  # noqa: E741
         col_c = f"shcoeffs_L{l}M0C"
         if col_c in df.columns:
             f[:, l, lmax] = df[col_c].values  # m=0 at index lmax
@@ -188,7 +188,7 @@ def _valid_triples(lmax: int) -> list[tuple[int, int, int]]:
     triples = []
     for l1 in range(lmax + 1):
         for l2 in range(l1, lmax + 1):
-            for l in range(abs(l1 - l2), min(l1 + l2, lmax) + 1):
+            for l in range(abs(l1 - l2), min(l1 + l2, lmax) + 1):  # noqa: E741
                 triples.append((l1, l2, l))
     return triples
 
@@ -210,7 +210,7 @@ def _power_spectrum_from_array(f_lm: np.ndarray, lmax: int) -> np.ndarray:
     """
     n = f_lm.shape[0]
     S = np.zeros((n, lmax + 1))
-    for l in range(lmax + 1):
+    for l in range(lmax + 1):  # noqa: E741
         m_slice = slice(lmax - l, lmax + l + 1)
         S[:, l] = np.sum(np.abs(f_lm[:, l, m_slice]) ** 2, axis=1)
     return S
@@ -236,7 +236,7 @@ def _bispectrum_from_array(f_lm: np.ndarray, lmax: int) -> np.ndarray:
     n = f_lm.shape[0]
     B = np.zeros((n, len(triples)))
 
-    for idx, (l1, l2, l) in enumerate(triples):
+    for idx, (l1, l2, l) in enumerate(triples):  # noqa: E741
         # Precompute nonzero CG entries for this triple
         cg_entries = []
         for m1 in range(-l1, l1 + 1):
@@ -285,7 +285,7 @@ def power_spectrum(coeffs, lmax: int) -> tuple[np.ndarray, list[str]]:
     """
     f_lm = _parse_coeffs_to_array(coeffs, lmax)
     S = _power_spectrum_from_array(f_lm, lmax)
-    names = [f"power_l{l}" for l in range(lmax + 1)]
+    names = [f"power_l{l}" for l in range(lmax + 1)]  # noqa: E741
     return S, names
 
 
@@ -314,7 +314,7 @@ def bispectrum(coeffs, lmax: int) -> tuple[np.ndarray, list[str]]:
     """
     f_lm = _parse_coeffs_to_array(coeffs, lmax)
     B = _bispectrum_from_array(f_lm, lmax)
-    names = [f"bispec_{l1}_{l2}_{l}" for l1, l2, l in _valid_triples(lmax)]
+    names = [f"bispec_{l1}_{l2}_{l}" for l1, l2, l in _valid_triples(lmax)]  # noqa: E741
     return B, names
 
 
@@ -369,11 +369,11 @@ def get_invariants(
     f_lm = _parse_coeffs_to_array(coeffs, lmax)
 
     S = _power_spectrum_from_array(f_lm, lmax)
-    ps_names = [f"power_l{l}" for l in range(lmax + 1)]
+    ps_names = [f"power_l{l}" for l in range(lmax + 1)]  # noqa: E741
 
     if include_bispectrum:
         B = _bispectrum_from_array(f_lm, lmax)
-        bs_names = [f"bispec_{l1}_{l2}_{l}" for l1, l2, l in _valid_triples(lmax)]
+        bs_names = [f"bispec_{l1}_{l2}_{l}" for l1, l2, l in _valid_triples(lmax)]  # noqa: E741
         X = np.concatenate([S, B], axis=1)
         feature_names = ps_names + bs_names
     else:

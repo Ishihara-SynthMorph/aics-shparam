@@ -121,7 +121,7 @@ test = "pytest"
 
 [tool.flake8]
 exclude = ["docs/"]
-ignore = ["E203", "E402", "W291", "W503", "E741"]
+ignore = ["E203", "E402", "W291", "W503"]
 max-line-length = 88
 
 [tool.pytest.ini_options]
