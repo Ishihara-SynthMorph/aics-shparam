@@ -242,6 +242,25 @@ def get_shcoeffs_from_mesh(
     centroid. ``check_mesh_for_parametrization`` is called to warn (not
     raise) when these assumptions appear to be violated.
 
+    Notes
+    -----
+    The ``alignment_2d`` and ``make_unique`` options behave the same way as
+    in ``get_shcoeffs``, but the alignment is computed differently and the
+    two paths are not guaranteed to produce bit-identical orientations for
+    the same object:
+
+    - The image path runs PCA on all foreground *voxel* (x, y) coordinates
+      (a volume point set), rotates the *image* (with interpolation), then
+      re-meshes.
+    - This mesh path runs PCA on the *surface vertex* (x, y) coordinates
+      and rotates the vertices directly (no interpolation).
+
+    The principal-axis angle formula is shared, but because the two point
+    sets differ the resulting angle can differ slightly. For a clean,
+    well-aligned object the two paths agree closely. Reproducing the image
+    path exactly would require voxelizing and aligning as an image, which
+    defeats the purpose of this entry point.
+
     Parameters
     ----------
     mesh : vtkPolyData
