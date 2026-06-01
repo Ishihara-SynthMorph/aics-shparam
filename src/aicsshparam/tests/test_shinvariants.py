@@ -23,10 +23,17 @@ from aicsshparam.shinvariants import (
     _cg,
     _parse_coeffs_to_array,
     _power_spectrum_from_array,
+    _so2_bispectrum_from_array,
+    _so2_cross_from_array,
+    _so2_power_from_array,
     _valid_triples,
     bispectrum,
     get_invariants,
+    get_so2_invariants,
     power_spectrum,
+    so2_bispectrum,
+    so2_cross_power,
+    so2_power_spectrum,
 )
 
 # ---------------------------------------------------------------------------
@@ -37,7 +44,7 @@ from aicsshparam.shinvariants import (
 def _make_toy_df(n: int, lmax: int, rng: np.random.Generator) -> pd.DataFrame:
     """Create a DataFrame with random shcoeffs columns (aics-shparam format)."""
     data = {}
-    for l in range(lmax + 1):
+    for l in range(lmax + 1):  # noqa: E741
         data[f"shcoeffs_L{l}M0C"] = rng.standard_normal(n)
         for m in range(1, lmax + 1):
             data[f"shcoeffs_L{l}M{m}C"] = rng.standard_normal(n)
@@ -48,7 +55,7 @@ def _make_toy_df(n: int, lmax: int, rng: np.random.Generator) -> pd.DataFrame:
 def _make_toy_dict(lmax: int, rng: np.random.Generator) -> dict:
     """Create a single-shape coefficient dict (aics-shparam format)."""
     data = {}
-    for l in range(lmax + 1):
+    for l in range(lmax + 1):  # noqa: E741
         data[f"shcoeffs_L{l}M0C"] = float(rng.standard_normal())
         for m in range(1, lmax + 1):
             data[f"shcoeffs_L{l}M{m}C"] = float(rng.standard_normal())
@@ -73,7 +80,7 @@ def _apply_wigner_d_rotation(f_lm: np.ndarray, lmax: int, rotation) -> np.ndarra
     alpha, beta, gamma = euler
 
     f_rot = np.zeros_like(f_lm)
-    for l in range(lmax + 1):
+    for l in range(lmax + 1):  # noqa: E741
         D = _wigner_d_matrix(l, alpha, beta, gamma)
         sl = slice(lmax - l, lmax + l + 1)
         f_rot[:, l, sl] = f_lm[:, l, sl] @ D.T
@@ -81,7 +88,9 @@ def _apply_wigner_d_rotation(f_lm: np.ndarray, lmax: int, rotation) -> np.ndarra
     return f_rot
 
 
-def _wigner_d_matrix(l: int, alpha: float, beta: float, gamma: float) -> np.ndarray:
+def _wigner_d_matrix(
+    l: int, alpha: float, beta: float, gamma: float
+) -> np.ndarray:  # noqa: E741,E501
     """Wigner D-matrix D^l_{m'm}(alpha,beta,gamma) in ZYZ convention.
 
     ``D^l_{m'm}`` = ``e^{-i*m'*alpha}`` * ``d^l_{m'm}(beta)``
@@ -99,7 +108,7 @@ def _wigner_d_matrix(l: int, alpha: float, beta: float, gamma: float) -> np.ndar
     return D
 
 
-def _small_d(l: int, mp: int, m: int, beta: float) -> float:
+def _small_d(l: int, mp: int, m: int, beta: float) -> float:  # noqa: E741
     """Small Wigner d-matrix element ``d^l_{mp,m}(beta)``."""
     cos_b2 = math.cos(beta / 2)
     sin_b2 = math.sin(beta / 2)
@@ -225,7 +234,7 @@ class TestPowerSpectrum:
         S = _power_spectrum_from_array(f_lm, lmax)
 
         for sample in range(n):
-            for l in range(lmax + 1):
+            for l in range(lmax + 1):  # noqa: E741
                 expected = sum(
                     abs(f_lm[sample, l, lmax + m]) ** 2 for m in range(-l, l + 1)
                 )
@@ -278,7 +287,7 @@ class TestCGCoefficient:
 
     def test_l0_coupling(self):
         """CG(l,m; 0,0 | l,m) = 1 for all l, m."""
-        for l in range(4):
+        for l in range(4):  # noqa: E741
             for m in range(-l, l + 1):
                 val = _cg(l, m, 0, 0, l, m)
                 np.testing.assert_allclose(
@@ -333,3 +342,161 @@ class TestRotationInvariance:
             atol=1e-6,
             err_msg="Bispectrum not invariant under rotation",
         )
+
+
+# ---------------------------------------------------------------------------
+# Tests: SO(2) invariants
+# ---------------------------------------------------------------------------
+
+
+class TestSO2FeatureCount:
+    def test_power_count(self):
+        """Per-(l, m) power has sum_l (l+1) = (lmax+1)(lmax+2)/2 features."""
+        rng = np.random.default_rng(0)
+        df = _make_toy_df(n=4, lmax=5, rng=rng)
+        X, names = so2_power_spectrum(df, lmax=5)
+        assert X.shape == (4, 21)  # 6*7/2
+        assert len(names) == 21
+        assert names[0] == "so2_power_l0_m0"
+
+    def test_default_is_power_plus_cross(self):
+        rng = np.random.default_rng(1)
+        df = _make_toy_df(n=3, lmax=5, rng=rng)
+        Xp, _ = so2_power_spectrum(df, lmax=5)
+        Xc, _ = so2_cross_power(df, lmax=5)
+        X, names = get_so2_invariants(df, lmax=5)
+        assert X.shape[1] == Xp.shape[1] + Xc.shape[1]
+        assert len(names) == X.shape[1]
+
+    def test_bispectrum_flag_adds_features(self):
+        rng = np.random.default_rng(2)
+        df = _make_toy_df(n=3, lmax=4, rng=rng)
+        X_no, _ = get_so2_invariants(df, lmax=4, include_bispectrum=False)
+        X_yes, _ = get_so2_invariants(df, lmax=4, include_bispectrum=True)
+        assert X_yes.shape[1] > X_no.shape[1]
+
+    def test_feature_name_prefixes(self):
+        rng = np.random.default_rng(3)
+        df = _make_toy_df(n=2, lmax=3, rng=rng)
+        _, names = get_so2_invariants(df, lmax=3, include_bispectrum=True)
+        assert any(n.startswith("so2_power_") for n in names)
+        assert any(n.startswith("so2_cross_") for n in names)
+        assert any(n.startswith("so2_bispec_") for n in names)
+
+
+class TestSO2InputFormats:
+    def test_dict_returns_1d(self):
+        rng = np.random.default_rng(10)
+        d = _make_toy_dict(lmax=4, rng=rng)
+        X, names = get_so2_invariants(d, lmax=4, include_bispectrum=True)
+        assert X.ndim == 1
+        assert X.shape[0] == len(names)
+
+    def test_dict_and_df_consistent(self):
+        rng = np.random.default_rng(11)
+        d = _make_toy_dict(lmax=3, rng=rng)
+        df = pd.DataFrame({k: [v] for k, v in d.items()})
+        X_dict, _ = get_so2_invariants(d, lmax=3, include_bispectrum=True)
+        X_df, _ = get_so2_invariants(df, lmax=3, include_bispectrum=True)
+        np.testing.assert_allclose(X_dict, X_df.squeeze(0), rtol=1e-12)
+
+    def test_public_so2_bispectrum_dict(self):
+        rng = np.random.default_rng(12)
+        d = _make_toy_dict(lmax=3, rng=rng)
+        X, names = so2_bispectrum(d, lmax=3)
+        assert X.ndim == 1
+        assert X.shape[0] == len(names)
+        assert np.issubdtype(X.dtype, np.floating)
+
+
+class TestSO2Correctness:
+    def test_power_is_abs_squared(self):
+        """so2 power feature l,m must equal |f_{l,m}|^2."""
+        rng = np.random.default_rng(20)
+        n, lmax = 3, 3
+        df = _make_toy_df(n=n, lmax=lmax, rng=rng)
+        f_lm = _parse_coeffs_to_array(df, lmax)
+        X, names = _so2_power_from_array(f_lm, lmax)
+        for idx, name in enumerate(names):
+            # name like so2_power_l{l}_m{m}
+            parts = name.split("_")
+            ell = int(parts[2][1:])
+            m = int(parts[3][1:])
+            expected = np.abs(f_lm[:, ell, lmax + m]) ** 2
+            np.testing.assert_allclose(X[:, idx], expected, rtol=1e-12)
+
+    def test_power_sums_to_so3_power(self):
+        """Summing per-m power (m=0 once, m>0 twice) recovers SO(3) S_l."""
+        rng = np.random.default_rng(21)
+        n, lmax = 3, 4
+        df = _make_toy_df(n=n, lmax=lmax, rng=rng)
+        f_lm = _parse_coeffs_to_array(df, lmax)
+        S3 = _power_spectrum_from_array(f_lm, lmax)
+        for ell in range(lmax + 1):
+            acc = np.abs(f_lm[:, ell, lmax + 0]) ** 2
+            for m in range(1, ell + 1):
+                acc = acc + 2.0 * np.abs(f_lm[:, ell, lmax + m]) ** 2
+            np.testing.assert_allclose(acc, S3[:, ell], rtol=1e-10)
+
+    def test_cross_m0_is_real(self):
+        """m=0 cross terms emit only a real part (imag identically zero)."""
+        rng = np.random.default_rng(22)
+        df = _make_toy_df(n=2, lmax=3, rng=rng)
+        f_lm = _parse_coeffs_to_array(df, lmax=3)
+        _, names = _so2_cross_from_array(f_lm, lmax=3)
+        m0_names = [n for n in names if n.endswith("_m0_re")]
+        m0_imag = [n for n in names if n.endswith("_m0_im")]
+        assert len(m0_names) > 0
+        assert len(m0_imag) == 0
+
+    def test_outputs_real(self):
+        rng = np.random.default_rng(23)
+        df = _make_toy_df(n=4, lmax=4, rng=rng)
+        X, _ = get_so2_invariants(df, lmax=4, include_bispectrum=True)
+        assert np.issubdtype(X.dtype, np.floating)
+
+
+class TestSO2RotationInvariance:
+    """SO(2) features are invariant under z-rotation but NOT general rotation."""
+
+    @pytest.fixture
+    def arrays(self):
+        pytest.importorskip("scipy.spatial.transform")
+        from scipy.spatial.transform import Rotation
+
+        rng = np.random.default_rng(99)
+        lmax = 3
+        df = _make_toy_df(n=2, lmax=lmax, rng=rng)
+        f_orig = _parse_coeffs_to_array(df, lmax)
+        # Pure z-rotation: ZYZ with beta=gamma=0 -> diagonal phase exp(-i m a)
+        rot_z = Rotation.from_euler("ZYZ", [0.7, 0.0, 0.0])
+        f_z = _apply_wigner_d_rotation(f_orig, lmax, rot_z)
+        # General rotation (nonzero beta) should break SO(2) invariance
+        rot_gen = Rotation.from_euler("ZYZ", [0.3, 0.7, 1.1])
+        f_gen = _apply_wigner_d_rotation(f_orig, lmax, rot_gen)
+        return f_orig, f_z, f_gen, lmax
+
+    def test_power_invariant_under_z(self, arrays):
+        f_orig, f_z, _, lmax = arrays
+        X0, _ = _so2_power_from_array(f_orig, lmax)
+        Xz, _ = _so2_power_from_array(f_z, lmax)
+        np.testing.assert_allclose(X0, Xz, atol=1e-8)
+
+    def test_cross_invariant_under_z(self, arrays):
+        f_orig, f_z, _, lmax = arrays
+        X0, _ = _so2_cross_from_array(f_orig, lmax)
+        Xz, _ = _so2_cross_from_array(f_z, lmax)
+        np.testing.assert_allclose(X0, Xz, atol=1e-8)
+
+    def test_bispectrum_invariant_under_z(self, arrays):
+        f_orig, f_z, _, lmax = arrays
+        X0, _ = _so2_bispectrum_from_array(f_orig, lmax)
+        Xz, _ = _so2_bispectrum_from_array(f_z, lmax)
+        np.testing.assert_allclose(X0, Xz, atol=1e-8)
+
+    def test_power_not_invariant_under_general_rotation(self, arrays):
+        """Per-m power must change under a non-z rotation (retains polar info)."""
+        f_orig, _, f_gen, lmax = arrays
+        X0, _ = _so2_power_from_array(f_orig, lmax)
+        Xg, _ = _so2_power_from_array(f_gen, lmax)
+        assert not np.allclose(X0, Xg, atol=1e-6)

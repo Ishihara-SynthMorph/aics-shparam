@@ -8,9 +8,26 @@ __email__ = "matheus.viana@alleninstitute.org"
 # Details in CONTRIBUTING.md
 __version__ = "0.1.11"
 
-__all__ = ["get_module_version", "get_invariants", "power_spectrum", "bispectrum"]
+__all__ = [
+    "get_module_version",
+    "get_invariants",
+    "power_spectrum",
+    "bispectrum",
+    "get_so2_invariants",
+    "so2_power_spectrum",
+    "so2_cross_power",
+    "so2_bispectrum",
+]
 
-from .shinvariants import get_invariants, power_spectrum, bispectrum
+from .shinvariants import (
+    get_invariants,
+    power_spectrum,
+    bispectrum,
+    get_so2_invariants,
+    so2_power_spectrum,
+    so2_cross_power,
+    so2_bispectrum,
+)
 
 
 def get_module_version():

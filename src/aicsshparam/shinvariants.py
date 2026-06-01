@@ -1,8 +1,24 @@
 """Rotation-invariant features from SPHARM coefficients.
 
-Implements SO(3)-invariant descriptors (power spectrum and bispectrum)
-from spherical harmonic coefficients produced by aics-shparam.
-Both features are provably rotation-invariant, unlike raw SH coefficients.
+Implements two families of invariant descriptors from spherical harmonic
+coefficients produced by aics-shparam:
+
+* **SO(3) invariants** (``power_spectrum``, ``bispectrum``,
+  ``get_invariants``) -- invariant under *any* 3D rotation.
+* **SO(2) invariants** (``so2_power_spectrum``, ``so2_cross_power``,
+  ``so2_bispectrum``, ``get_so2_invariants``) -- invariant only under
+  rotation about the z-axis, while *retaining* the polar (up/down)
+  information that SO(3) averages away.  Useful when there is a physically
+  meaningful axis (gravity, apical-basal polarity, optical axis).
+
+Both families are provably invariant under their respective symmetry group,
+unlike raw SH coefficients.
+
+The SO(2) case is abelian: under a z-rotation by ``alpha`` each coefficient
+picks up a pure phase ``f_{l,m} -> exp(-i*m*alpha) * f_{l,m}``.  Any product
+of coefficients whose signed ``m`` values sum to zero is therefore invariant,
+and -- unlike the SO(3) case -- no Clebsch-Gordan / Wigner-3j weights are
+needed.
 
 References
 ----------
@@ -314,7 +330,9 @@ def bispectrum(coeffs, lmax: int) -> tuple[np.ndarray, list[str]]:
     """
     f_lm = _parse_coeffs_to_array(coeffs, lmax)
     B = _bispectrum_from_array(f_lm, lmax)
-    names = [f"bispec_{l1}_{l2}_{l}" for l1, l2, l in _valid_triples(lmax)]  # noqa: E741
+    names = [
+        f"bispec_{l1}_{l2}_{l}" for l1, l2, l in _valid_triples(lmax)
+    ]  # noqa: E741
     return B, names
 
 
@@ -373,12 +391,342 @@ def get_invariants(
 
     if include_bispectrum:
         B = _bispectrum_from_array(f_lm, lmax)
-        bs_names = [f"bispec_{l1}_{l2}_{l}" for l1, l2, l in _valid_triples(lmax)]  # noqa: E741
+        bs_names = [
+            f"bispec_{l1}_{l2}_{l}" for l1, l2, l in _valid_triples(lmax)
+        ]  # noqa: E741
         X = np.concatenate([S, B], axis=1)
         feature_names = ps_names + bs_names
     else:
         X = S
         feature_names = ps_names
+
+    if is_dict:
+        X = X.squeeze(0)
+
+    return X, feature_names
+
+
+# ---------------------------------------------------------------------------
+# SO(2) invariants (rotation about the z-axis only)
+# ---------------------------------------------------------------------------
+#
+# Under a z-rotation by alpha, f_{l,m} -> exp(-i*m*alpha) * f_{l,m}.  Because
+# the group is abelian (1-D irreps), any product of coefficients whose signed
+# m's sum to zero is invariant -- no Clebsch-Gordan weights required.  These
+# features keep each m separately (rather than summing over m as the SO(3)
+# power spectrum does), so they retain polar information but are tied to the
+# chosen z-axis.
+#
+# The aics-shparam coefficients describe a real-valued function, so
+# f_{l,-m} = (-1)^m * conj(f_{l,m}).  Consequently |f_{l,-m}| = |f_{l,m}| and
+# the m<0 features are redundant with the m>=0 ones; the enumerations below
+# use this to avoid duplicate features.
+
+
+def _so2_power_from_array(f_lm: np.ndarray, lmax: int):
+    """Per-(l, m) power ``|f_{l,m}|^2`` for ``m = 0 .. l``.
+
+    Each term is z-rotation invariant because ``|exp(-i*m*alpha)| = 1``.
+    Only ``m >= 0`` is kept since ``|f_{l,-m}| = |f_{l,m}|`` for a real field.
+
+    Returns
+    -------
+    X : np.ndarray, shape ``(n_samples, n_features)``
+    names : list[str]
+    """
+    n = f_lm.shape[0]
+    feats = []
+    names = []
+    for l in range(lmax + 1):  # noqa: E741
+        for m in range(l + 1):
+            feats.append(np.abs(f_lm[:, l, lmax + m]) ** 2)
+            names.append(f"so2_power_l{l}_m{m}")
+    X = np.stack(feats, axis=1) if feats else np.zeros((n, 0))
+    return X, names
+
+
+def _so2_cross_from_array(f_lm: np.ndarray, lmax: int):
+    """Same-m cross-degree correlations ``f_{l1,m} * conj(f_{l2,m})``.
+
+    For each shared order ``m`` and pair of degrees ``l1 < l2`` (both
+    ``>= m``), the product's phases ``exp(-i*m*alpha)`` and
+    ``exp(+i*m*alpha)`` cancel, so both real and imaginary parts are
+    invariant.  The imaginary part encodes the relative azimuthal offset
+    between degrees and vanishes identically for ``m = 0`` (real
+    coefficients), so it is emitted only for ``m >= 1``.
+
+    Returns
+    -------
+    X : np.ndarray, shape ``(n_samples, n_features)``
+    names : list[str]
+    """
+    n = f_lm.shape[0]
+    feats = []
+    names = []
+    for m in range(lmax + 1):
+        degrees = list(range(m, lmax + 1))
+        for i in range(len(degrees)):
+            for j in range(i + 1, len(degrees)):
+                l1, l2 = degrees[i], degrees[j]
+                prod = f_lm[:, l1, lmax + m] * np.conj(f_lm[:, l2, lmax + m])
+                feats.append(prod.real)
+                names.append(f"so2_cross_l{l1}_l{l2}_m{m}_re")
+                if m >= 1:
+                    feats.append(prod.imag)
+                    names.append(f"so2_cross_l{l1}_l{l2}_m{m}_im")
+    X = np.stack(feats, axis=1) if feats else np.zeros((n, 0))
+    return X, names
+
+
+def _so2_bispectrum_terms(lmax: int):
+    """Canonical, de-duplicated SO(2) bispectrum terms.
+
+    A term couples ``f_{l1,m1} * f_{l2,m2} * conj(f_{l3,m3})`` with
+    ``m3 = m1 + m2`` (so the signed m's sum to zero -> invariant).  Two
+    symmetries are quotiented out to avoid redundant features:
+
+    * **Swap** ``(l1, m1) <-> (l2, m2)`` leaves the product unchanged.
+    * **Sign flip** ``(m1, m2, m3) -> (-m1, -m2, -m3)`` maps the product to
+      its complex conjugate (real field identity), duplicating Re and
+      negating Im.
+
+    Each orbit under these symmetries contributes one term.  ``has_imag`` is
+    ``False`` when the term is fixed by the sign flip (the product is real,
+    e.g. all m = 0), in which case the imaginary part is identically zero.
+
+    Returns
+    -------
+    list of tuple ``(l1, m1, l2, m2, l3, has_imag)``
+    """
+    seen = set()
+    terms = []
+    for l1 in range(lmax + 1):  # noqa: E741
+        for l2 in range(l1, lmax + 1):  # noqa: E741
+            for m1 in range(-l1, l1 + 1):
+                for m2 in range(-l2, l2 + 1):
+                    m3 = m1 + m2
+                    if abs(m3) > lmax:
+                        continue
+                    # canonical key under swap (sorted pair) and sign flip
+                    key_pos = (tuple(sorted([(l1, m1), (l2, m2)])),)
+                    key_neg = (tuple(sorted([(l1, -m1), (l2, -m2)])),)
+                    has_imag = key_pos != key_neg
+                    for l3 in range(abs(m3), lmax + 1):  # noqa: E741
+                        canon = min(
+                            (key_pos[0], l3),
+                            (key_neg[0], l3),
+                        )
+                        if canon in seen:
+                            continue
+                        seen.add(canon)
+                        terms.append((l1, m1, l2, m2, l3, has_imag))
+    return terms
+
+
+def _so2_bispectrum_from_array(f_lm: np.ndarray, lmax: int):
+    """SO(2) bispectrum ``f_{l1,m1} * f_{l2,m2} * conj(f_{l3,m1+m2})``.
+
+    Fixes the relative phases between different m-channels, which the
+    same-m cross terms cannot capture.
+
+    Returns
+    -------
+    X : np.ndarray, shape ``(n_samples, n_features)``
+    names : list[str]
+    """
+    n = f_lm.shape[0]
+    feats = []
+    names = []
+    for l1, m1, l2, m2, l3, has_imag in _so2_bispectrum_terms(lmax):
+        m3 = m1 + m2
+        prod = (
+            f_lm[:, l1, lmax + m1]
+            * f_lm[:, l2, lmax + m2]
+            * np.conj(f_lm[:, l3, lmax + m3])
+        )
+        base = f"so2_bispec_l{l1}m{m1}_l{l2}m{m2}_l{l3}"
+        feats.append(prod.real)
+        names.append(f"{base}_re")
+        if has_imag:
+            feats.append(prod.imag)
+            names.append(f"{base}_im")
+    X = np.stack(feats, axis=1) if feats else np.zeros((n, 0))
+    return X, names
+
+
+def so2_power_spectrum(coeffs, lmax: int) -> tuple[np.ndarray, list[str]]:
+    """Compute the SO(2) per-(l, m) power spectrum.
+
+    Each feature is ``|f_{l,m}|^2`` for ``m = 0 .. l``, invariant under
+    rotation about the z-axis.  Unlike the SO(3) power spectrum this keeps
+    each ``m`` separately, retaining the polar distribution of the shape.
+
+    Parameters
+    ----------
+    coeffs : dict or pd.DataFrame
+        SPHARM coefficients in aics-shparam format.  Pass a ``dict`` for a
+        single shape or a ``pd.DataFrame`` for batch processing.
+    lmax : int
+        Maximum spherical harmonic degree.
+
+    Returns
+    -------
+    X : np.ndarray
+        Shape ``(n_features,)`` for dict input or
+        ``(n_samples, n_features)`` for DataFrame input.
+    names : list[str]
+        Feature names, e.g. ``['so2_power_l0_m0', 'so2_power_l1_m0', ...]``.
+    """
+    is_dict = isinstance(coeffs, dict)
+    f_lm = _parse_coeffs_to_array(coeffs, lmax)
+    X, names = _so2_power_from_array(f_lm, lmax)
+    if is_dict:
+        X = X.squeeze(0)
+    return X, names
+
+
+def so2_cross_power(coeffs, lmax: int) -> tuple[np.ndarray, list[str]]:
+    """Compute SO(2) same-m cross-degree correlation features.
+
+    Real and imaginary parts of ``f_{l1,m} * conj(f_{l2,m})`` for ``l1 < l2``
+    sharing order ``m``.  The imaginary part (``m >= 1`` only) encodes the
+    relative azimuthal offset between degrees.
+
+    Parameters
+    ----------
+    coeffs : dict or pd.DataFrame
+        SPHARM coefficients in aics-shparam format.
+    lmax : int
+        Maximum spherical harmonic degree.
+
+    Returns
+    -------
+    X : np.ndarray
+        Shape ``(n_features,)`` for dict input or
+        ``(n_samples, n_features)`` for DataFrame input.
+    names : list[str]
+        Feature names, e.g. ``['so2_cross_l0_l1_m0_re', ...]``.
+    """
+    is_dict = isinstance(coeffs, dict)
+    f_lm = _parse_coeffs_to_array(coeffs, lmax)
+    X, names = _so2_cross_from_array(f_lm, lmax)
+    if is_dict:
+        X = X.squeeze(0)
+    return X, names
+
+
+def so2_bispectrum(coeffs, lmax: int) -> tuple[np.ndarray, list[str]]:
+    """Compute the SO(2) bispectrum.
+
+    Real and imaginary parts of ``f_{l1,m1} * f_{l2,m2} * conj(f_{l3,m1+m2})``
+    over a canonical, de-duplicated set of couplings.  These fix the relative
+    phases between different m-channels.
+
+    Note
+    ----
+    The number of bispectrum features grows quickly with ``lmax``; this tier
+    is intended as an optional, higher-order complement to the power and
+    cross-power features.
+
+    Parameters
+    ----------
+    coeffs : dict or pd.DataFrame
+        SPHARM coefficients in aics-shparam format.
+    lmax : int
+        Maximum spherical harmonic degree.
+
+    Returns
+    -------
+    X : np.ndarray
+        Shape ``(n_features,)`` for dict input or
+        ``(n_samples, n_features)`` for DataFrame input.
+    names : list[str]
+        Feature names, e.g. ``['so2_bispec_l1m1_l1m-1_l0_re', ...]``.
+    """
+    is_dict = isinstance(coeffs, dict)
+    f_lm = _parse_coeffs_to_array(coeffs, lmax)
+    X, names = _so2_bispectrum_from_array(f_lm, lmax)
+    if is_dict:
+        X = X.squeeze(0)
+    return X, names
+
+
+def get_so2_invariants(
+    coeffs,
+    lmax: int,
+    include_cross: bool = True,
+    include_bispectrum: bool = False,
+) -> tuple[np.ndarray, list[str]]:
+    """Compute SO(2) (z-axis) rotation-invariant SPHARM features.
+
+    Concatenates the per-(l, m) power spectrum with, optionally, the same-m
+    cross-degree correlations and the SO(2) bispectrum.  All features are
+    invariant under rotation of the shape about the z-axis but -- unlike the
+    SO(3) features -- retain the polar (up/down) distribution.
+
+    The three tiers, in increasing order, are:
+
+    1. ``so2_power``  -- ``|f_{l,m}|^2`` (always included).
+    2. ``so2_cross``  -- same-m cross-degree correlations
+       (``include_cross``, default ``True``).
+    3. ``so2_bispec`` -- SO(2) bispectrum
+       (``include_bispectrum``, default ``False``; grows quickly with
+       ``lmax``).
+
+    Parameters
+    ----------
+    coeffs : dict or pd.DataFrame
+        SPHARM coefficients in aics-shparam format (keys/columns
+        ``shcoeffs_L{l}M{m}C`` and ``shcoeffs_L{l}M{m}S``).
+        Passing a ``dict`` returns a 1-D feature vector; passing a
+        ``pd.DataFrame`` returns a 2-D array with one row per shape.
+    lmax : int
+        Maximum spherical harmonic degree.
+    include_cross : bool, optional
+        Append same-m cross-degree features (default ``True``).
+    include_bispectrum : bool, optional
+        Append SO(2) bispectrum features (default ``False``).
+
+    Returns
+    -------
+    X : np.ndarray
+        Shape ``(n_features,)`` for dict input or
+        ``(n_samples, n_features)`` for DataFrame input.
+    feature_names : list[str]
+        Names for each element / column of X.
+
+    Notes
+    -----
+    SO(2) invariants are tied to the chosen z-axis and are only meaningful if
+    that axis is defined consistently across samples.  aics-shparam computes
+    coefficients in the fixed image frame, so the z-axis is the image z-axis.
+
+    Examples
+    --------
+    >>> X, names = get_so2_invariants(coeffs, lmax=5)
+    >>> X, names = get_so2_invariants(df, lmax=5, include_bispectrum=True)
+    """
+    is_dict = isinstance(coeffs, dict)
+    f_lm = _parse_coeffs_to_array(coeffs, lmax)
+
+    blocks = []
+    feature_names: list[str] = []
+
+    Xp, names_p = _so2_power_from_array(f_lm, lmax)
+    blocks.append(Xp)
+    feature_names += names_p
+
+    if include_cross:
+        Xc, names_c = _so2_cross_from_array(f_lm, lmax)
+        blocks.append(Xc)
+        feature_names += names_c
+
+    if include_bispectrum:
+        Xb, names_b = _so2_bispectrum_from_array(f_lm, lmax)
+        blocks.append(Xb)
+        feature_names += names_b
+
+    X = np.concatenate(blocks, axis=1)
 
     if is_dict:
         X = X.squeeze(0)
