@@ -10,6 +10,8 @@ __version__ = "0.1.11"
 
 __all__ = [
     "get_module_version",
+    "get_shcoeffs_from_mesh",
+    "get_shcoeffs_from_vertices_faces",
     "get_invariants",
     "power_spectrum",
     "bispectrum",
@@ -19,6 +21,7 @@ __all__ = [
     "so2_bispectrum",
 ]
 
+from .shparam import get_shcoeffs_from_mesh, get_shcoeffs_from_vertices_faces  # noqa: E402,F401
 from .shinvariants import (
     get_invariants,
     power_spectrum,
