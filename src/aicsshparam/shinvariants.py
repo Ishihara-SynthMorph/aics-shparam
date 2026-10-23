@@ -700,6 +700,13 @@ def get_so2_invariants(
     SO(2) invariants are tied to the chosen z-axis and are only meaningful if
     that axis is defined consistently across samples.  aics-shparam computes
     coefficients in the fixed image frame, so the z-axis is the image z-axis.
+    This function does not align anything itself -- it assumes the input has
+    already been rotated so that z carries a physically meaningful, sample-
+    consistent orientation (e.g. a cell imaged on a coverslip, pre-rotated so
+    the coverslip side is always at -z) before calling ``get_shcoeffs``.
+    Features are invariant to rotation about that axis but still distinguish
+    up (+z) from down (-z); if the alignment step is inconsistent or skipped,
+    the polar structure these features retain is meaningless.
 
     Examples
     --------
